@@ -1,0 +1,115 @@
+{
+  "name": "Assistente de Investimentos - MVP (mensagens estáticas)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "clientes",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "a1000000-0000-4000-8000-000000000001",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 0],
+      "webhookId": "assistente-investimentos-clientes"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Recebe { clientes: [...] } do script Python e devolve 1 item por cliente valido\nconst entrada = $input.first().json;\nconst body = entrada.body || entrada;\nconst clientes = Array.isArray(body.clientes) ? body.clientes : [];\n\nconst emailValido = (e) => typeof e === 'string' && /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(e.trim());\n\nconst modelos = {\n  conservador: {\n    produto: 'CDB com liquidez diária',\n    texto: 'Pelo seu perfil conservador, o foco é segurança e previsibilidade. Uma opção a considerar é um CDB com liquidez diária, que costuma permitir resgate rápido sem grandes oscilações.'\n  },\n  moderado: {\n    produto: 'Carteira equilibrada (renda fixa + fundos)',\n    texto: 'Pelo seu perfil moderado, vale buscar equilíbrio entre renda fixa e uma parcela menor em fundos de maior potencial de retorno.'\n  },\n  arrojado: {\n    produto: 'Carteira com maior parcela em renda variável',\n    texto: 'Pelo seu perfil arrojado, voce aceita mais oscilacao em busca de retorno maior. Uma opcao a considerar e ampliar a parcela em acoes e fundos de renda variável, mantendo uma reserva em renda fixa.'\n  }\n};\n\nconst saida = [];\nconst ignorados = [];\n\nfor (const c of clientes) {\n  if (!emailValido(c.email)) { ignorados.push(c.nome || '(sem nome)'); continue; }\n  const perfil = String(c.perfil || 'moderado').trim().toLowerCase();\n  const m = modelos[perfil] || modelos.moderado;\n  const nome = c.nome || 'cliente';\n  saida.push({ json: {\n    nome,\n    email: c.email.trim(),\n    perfil: modelos[perfil] ? perfil : 'moderado',\n    saldo: c.saldo ?? null,\n    produto: m.produto,\n    assunto: `Sugestão de investimento: ${m.produto}`,\n    html: `<p>Olá, ${nome}!</p><p>${m.texto}</p><p><small>Mensagem informativa e educacional. Não constitui recomendação individual de investimento.</small></p><p>Atenciosamente,<br>Sua equipe de investimentos</p>`\n  }});\n}\n\nif (saida.length === 0) {\n  return [{ json: { semClientes: true, ignorados } }];\n}\nreturn saida;"
+      },
+      "id": "a1000000-0000-4000-8000-000000000002",
+      "name": "Preparar mensagens",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [240, 0]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose" },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.semClientes }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "notEquals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a1000000-0000-4000-8000-000000000003",
+      "name": "Tem cliente válido?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [480, 0]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.email }}",
+        "subject": "={{ $json.assunto }}",
+        "emailType": "html",
+        "message": "={{ $json.html }}",
+        "options": {}
+      },
+      "id": "a1000000-0000-4000-8000-000000000004",
+      "name": "Enviar e-mail (Gmail)",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [720, -80],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const enviados = $input.all().length;\nreturn [{ json: { ok: true, enviados } }];"
+      },
+      "id": "a1000000-0000-4000-8000-000000000005",
+      "name": "Resumo",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [960, -80]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "a1000000-0000-4000-8000-000000000006",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1200, 0]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: false, motivo: 'nenhum cliente com e-mail válido' }) }}",
+        "options": { "responseCode": 400 }
+      },
+      "id": "a1000000-0000-4000-8000-000000000007",
+      "name": "Responder erro",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [720, 120]
+    }
+  ],
+  "connections": {
+    "Webhook": { "main": [[{ "node": "Preparar mensagens", "type": "main", "index": 0 }]] },
+    "Preparar mensagens": { "main": [[{ "node": "Tem cliente válido?", "type": "main", "index": 0 }]] },
+    "Tem cliente válido?": {
+      "main": [
+        [{ "node": "Enviar e-mail (Gmail)", "type": "main", "index": 0 }],
+        [{ "node": "Responder erro", "type": "main", "index": 0 }]
+      ]
+    },
+    "Enviar e-mail (Gmail)": { "main": [[{ "node": "Resumo", "type": "main", "index": 0 }]] },
+    "Resumo": { "main": [[{ "node": "Respond to Webhook", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" }
+}
